@@ -20,11 +20,8 @@ use strict;
 use warnings;
 use utf8;
 use Encode;
-use Data::Dumper;
 
 use XML::Simple;
-use Getopt::Long;
-
 use Pod::Usage;
 use Getopt::Long qw/:config posix_default no_ignore_case bundling auto_help/;
 
