@@ -1,18 +1,36 @@
 #!/usr/bin/perl
+
+=head1 NAME
+
+reply some followers post
+
+=head1 SYNOPSIS
+
+randomPost [options] 
+ Options:
+   --dry-run         dryrun
+=cut
+
 use strict;
 use warnings;
 use XML::Simple;
 use utf8;
 use Data::Dumper;
 use Encode;
-use Getopt::Long;
+use Getopt::Long qw/:config posix_default no_ignore_case bundling auto_help/;
 
 use update;
 
 #コマンドラインオプション
 my $dry_run = 0;
 
-GetOptions('dry-run' => \$dry_run );
+GetOptions(
+        \my %opts, qw/
+        dry-run
+        /
+        ) or pod2usage(verbose => 0);
+
+my $dry_run = $opts{'dry-run'};
 
 #デバッグ時はSmart::Commentsをインストールしてある場合，
 # perl -MSmart::Comments reply.pl
@@ -23,28 +41,27 @@ my $configFileName = "configure.xml";
 if(!( -f $configFileName)){
 	die "$configFileName is not found.\n";
 }
+
 my $configXs = XML::Simple->new();
 my $config = $configXs->XMLin($configFileName);
 
 #前回の状態ファイルを読む
 my $stateFileName = "state.xml";
 
-
-if(!( -f $stateFileName)){
-	#fixme
-	#ファイルが無い場合は自動で作られるようにすること。
-	die "$stateFileName is not found.\n";
-}
-
-
-
 my $stateXs = XML::Simple->new();
-my $state = $stateXs->XMLin($stateFileName);
+$state = $stateXs->XMLin($stateFileName);
 
-#前回終了時の情報を取得
-#最後にチェックしたid
-my $lastCheckedId = $state->{'lastCheckedId'};
-### $lastCheckedId;
+#初期状態
+my $state = 0;
+
+
+
+#状態ファイルがある場合、前回終了時の情報を取得
+#ない場合は前回は0とみなす
+my $lastCheckedId = 0;
+if(-f $stateFileName){
+	$lastCheckedId = $state->{'lastCheckedId'};
+}
 
 #タイムライン取得
 my $r_timeline = myUpdateStatus::friendsTimeline(
@@ -64,7 +81,6 @@ $state->{'lastCheckedId'} = $nextLastChackedId;
 
 #前回からタイムラインの更新がなければ、終了
 if(!defined($nextLastChackedId)){
-### 	
 	exit;
 }
 
@@ -132,15 +148,20 @@ foreach my $r_status(@timeline){
 
 
 #現在の状態をファイルに書き出し
-my $newState = new XML::Simple; 
-$newState->XMLout($state,
-		  NoAttr=>1,
-		  OutputFile => 'state.xml',
-		  XMLDecl    => "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>",
-		  RootName => 'state'
-		  );
+&writeNewState($state);
 
 exit;
+
+sub writeNewState(){
+	my $state = shift;
+	my $newState = new XML::Simple; 
+	$newState->XMLout($state,
+			  NoAttr=>1,
+			  OutputFile => 'state.xml',
+			  XMLDecl    => "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>",
+			  RootName => 'state'
+			  );
+}
 
 sub isWordExists(){
 	my $r_list = $_[0];
