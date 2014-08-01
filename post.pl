@@ -51,7 +51,7 @@ my $bot = MyBot->new();
 my $data = decode('UTF-8',$opt{'post'});
 
 if($opt{'post'}){
-		&update($bot,encode_utf8($data),$opt{'dry-run'});
+		&update($bot,$data,$opt{'dry-run'});
 		exit;
 }
 
@@ -61,6 +61,8 @@ my $filename = $opt{'file'};
 open my $fh,'<',$filename or die "Cannot open $filename:$!";
 my @lines = <$fh>;
 close $fh or die "Cannot close $filename:$!";
+
+@lines = map {decode_utf8 $_} @lines;
 
 my $line_count = @lines;
 my $idx        = int(rand ($line_count-1));
@@ -79,7 +81,7 @@ sub update{
 		my ($bot,$data,$dry) = @_;
 		
 		if($dry){
-				print $data;
+				print encode_utf8($data);
 		}
 		else{
 				$bot->{'twit'}->update($data);
