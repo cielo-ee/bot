@@ -6,9 +6,14 @@ reply some followers post
 
 =head1 SYNOPSIS
 
-randomPost [options] 
+reply [options] 
  Options:
-   --dry-run         dryrun
+   --dry-run -n       表示だけして終了
+   --file    -f       ファイル名（デフォルトreplyData.tsv）
+   --post    -p       与えた文字列をpost
+   --statid  -s       replyするstatus id
+   --myid    -m       自分のidが書かれたファイル(デフォルトreplyData.tsv);
+   与えられたstatus idに対してreply(-sと-pは同時に使う必要がある)
 =cut
 
 use strict;
@@ -19,189 +24,198 @@ use Data::Dumper;
 use Encode;
 use Getopt::Long qw/:config posix_default no_ignore_case bundling auto_help/;
 
-use update;
+use MyBot;
+
 
 #コマンドラインオプション
-my $dry_run = 0;
+my %opt = (
+		'dry-run' => 0,
+		'file'    => 'replyData.tsv',
+		'myid'    => 'myid.txt',
+		'NGword'  => 'NGword.txt',
+		'NGuser'  => 'NGuser.txt',
+		'lastidf' => 'lastId.txt',
+		'post'    => undef,
+		'statid'  => undef
+		);
+
 
 GetOptions(
         \my %opts, qw/
-        dry-run
+        dry-run|n
+		file|r=s
+		myid|m=s
+		NGword|w=s
+		NGuser|u=s
+		lastidf|l=s
+		post|p=s
+		statf|s=s
         /
         ) or pod2usage(verbose => 0);
 
-my $dry_run = $opts{'dry-run'};
 
-#デバッグ時はSmart::Commentsをインストールしてある場合，
-# perl -MSmart::Comments reply.pl
-#のようにして実行
+#設定ファイルの読み込み
+my $config = &init(%opt);
 
-#設定ファイルを読む
-my $configFileName = "configure.xml";
-if(!( -f $configFileName)){
-	die "$configFileName is not found.\n";
-}
+#print Dumper $config;
 
-my $configXs = XML::Simple->new();
-my $config = $configXs->XMLin($configFileName);
 
-#前回の状態ファイルを読む
-my $stateFileName = "state.xml";
-
-my $stateXs = XML::Simple->new();
-$state = $stateXs->XMLin($stateFileName);
-
-#初期状態
-my $state = 0;
-
+#Net::Twitterのオブジェクトを作る
+my $bot = MyBot->new();
 
 
 #状態ファイルがある場合、前回終了時の情報を取得
-#ない場合は前回は0とみなす
-my $lastCheckedId = 0;
-if(-f $stateFileName){
-	$lastCheckedId = $state->{'lastCheckedId'};
+#ない場合は前回は1とみなす(0だとエラーになる・・・)
+my $lastCheckedId = 1;
+
+my $lastIdfile = $opt{'lastidf'};
+if(-f $lastIdfile){
+		$lastCheckedId = loadLine($lastIdfile);
 }
 
-#タイムライン取得
-my $r_timeline = myUpdateStatus::friendsTimeline(
-	since_id => $lastCheckedId,
-	count => 200
-    );
+my $r_timeline = $bot->{'twit'}->home_timeline({since_id => $lastCheckedId})
+	 or die "failed to get timeline.\n";
 
-if(!defined($r_timeline)){ #タイムライン取得失敗
-	die "failed to get timeline.\n";
-}
-
-my @timeline = @$r_timeline;
-
+	 
 #取得したタイムラインの中の最新のid
-my $nextLastChackedId = $timeline[0]->{'id'};
-$state->{'lastCheckedId'} = $nextLastChackedId;
+my $nextLastChackedId = $r_timeline->[0]->{'id'};
+saveLine($lastIdfile,$nextLastChackedId);
 
-#前回からタイムラインの更新がなければ、終了
-if(!defined($nextLastChackedId)){
-	exit;
-}
 
 
 #古い順に読まないといけないので、ひっくり返す
-@timeline = reverse(@timeline);
+my @timeline = reverse(@$r_timeline);
 
 
-my $r_skipWords = $config->{'skipData'};
-my $r_patterns =  $config->{'replyData'}->{'pattern'};
-my @replyPatterns = @$r_patterns;
-#print @replyPatterns;
+#foreach(@timeline){
+#		&execReply($bot,$myID,$_,\@OK,\@NG,$opt{'dry-run'});
+#}
 
 
-foreach my $r_status(@timeline){
-	if($r_status->{'user'}{'id'} == $config->{'userinfo'}->{'userid'}){
-		#自分自身だったらスキップ
-		next;
-	}
-	if($r_status->{'text'} =~ /@/){
-		if(!defined($r_status->{'in_reply_to_screen_name'})){
-			#@で始まっていない
-			next;
+
+exit;
+
+
+
+sub getMyId{
+		my ($bot,$filename) = @_;
+		my $id = 0;
+		if(-f $filename){
+				$id = loadLine($filename);
 		}
-		if($r_status->{'in_reply_to_screen_name'} eq $config->{'userinfo'}->{'username'}){
-			#自分への@だったらスキップしない
-#			print Dumper $r_status;
+		else{   #ファイルがない場合は、APIを叩いてIDを持ってくる
+				$id = $bot->{'twit'}->update_profile()->{'id'};
+				saveLine($filename,$id);
+		}
+		return $id;
+}
+
+sub loadLine{
+		my $filename = shift;	
+		open my $fh, '<',$filename or die "Cannnot open $filename:$!";
+		my $line = readline $fh;
+		close $fh or die "Cannot close $filename:$!";
+		chomp $line;
+		return $line;
+}
+
+sub saveLine{
+		my ($filename,$line) = @_;
+		open my $fh,'>',$filename or die "Cannot open $filename:$!";
+		print $fh $line;
+		close $fh or die "Cannot close $filename:$!";
+}
+
+sub getReplyData{
+		my $filename = shift;
+		open my $fh, '<',$filename or die "Cannnot open $filename:$!";
+		my @lines = <$fh>;
+		close $fh or die "Cannot close $filename:$!";
+		return @lines;
+}
+
+
+sub isWordExists{
+		my ($text,$wordlist) = @_;
+
+		foreach my $word(@$wordlist){
+				return if $text =~ /$word/;
+		}
+}
+
+sub loadFile{
+		my $filename = shift;
+		open my $fh,'<',$filename or die "Cannot open $filename:$!";
+		my @lines = <$fh>;
+		close $fh or die "Cannot close $filename:$!";
+		@lines = map {decode_utf8 $_} @lines;
+		@lines = chomp for @lines;
+		return @lines;
+}
+
+sub loadReplyFile{
+		my $filename = shift;
+		my %replyData = ();
+		
+		my @lines = &loadFile($filename);
+
+		foreach my $line(@lines){
+				my ($key,$value) = split /\t/,$line;
+				$replyData{$key} = $value;
+		}
+
+		return %replyData;
+}
+
+
+
+
+sub init{
+		#設定ファイルの読み込み
+		my %opt = @_;
+
+		my $myID      = &getMyId($bot,$opt{'myid'});
+		my %replyPair  = loadReplyFile($opt{'file'});
+		my $NGwordfile = $opt{'NGword'};
+		my $NGuserfile = $opt{'NGdata'};
+		my $id = getMyId($bot,$opt{'myid'});
+		my @NGword = ();
+		my @NGuser = ();
+		if(-f $NGwordfile){
+				@NGword = loadFile($NGwordfile);
+				print Dumper @NGword;
+		}
+		if(-f $NGuserfile){
+				@NGuser = loadFile($NGuserfile);
+		}
+		
+		my $config ={
+				'myID'            => $myID,
+				'replyPair'       => \%replyPair,
+				'id'              => $id,
+				'NGword'          => \@NGword,
+				'NGuser'          => \@NGuser
+		};
+
+		return $config;
+
+}
+
+__END__
+
+sub execReply{
+		my ($bot,$myId,$line,$NG,$OK,$dry) = @_;
+		return if $line->{'user'}->{'id'} == $myId; #自分自身にはリプライ不要
+		my $text = $line->{'text'};
+		return if  $text =~ /@/; #@が入っていたらリプライ不要
+		return if &isWordExists($text,$NG); #Ngワードが入っていたらリプライ不要
+
+		if($dry){
+				print encode_utf8();
 		}
 		else{
-			#誰かへの@だったらスキップ
-			next;
+				$bot->{'twit'}->update() if (&isWordExists($line,$OK));
 		}
-	}
-	if(&isWordExists($r_skipWords->{'skip'},$r_status->{'text'})){
-		#スキップすべき単語だったらスキップ
-		next;
-	}
-	foreach my $r_reply(@replyPatterns){
-#		print $r_reply->{'source'}."\n";
-		if($r_status->{'text'} =~ /$r_reply->{'source'}/){
-			my $replyText;
-			if('ARRAY' eq ref($r_reply->{'reply'})){
-				my $dataSize =  @{$r_reply->{'reply'}};
-				$replyText = $r_reply->{'reply'}[int(rand($dataSize))];
-			}
-			else{
-				$replyText = $r_reply->{'reply'};
-			}
-			my $replyName = $r_status->{'user'}{'screen_name'};
-			my $inReplyTo = $r_status->{'id'};
-#			&reply($twit,$replyName,$replyText,$inReplyTo,$dry_run);
+		return;
 
-#			print $replyText."\n"; 
-			&reply(
-				reply_to => $replyName,
-				reply_text => $replyText,
-				inReplyTo => $inReplyTo,
-				dry_run   => $dry_run
-				);
-			next;
-		}
-	}
-
-}
-
-
-#現在の状態をファイルに書き出し
-&writeNewState($state);
-
-exit;
-
-sub writeNewState(){
-	my $state = shift;
-	my $newState = new XML::Simple; 
-	$newState->XMLout($state,
-			  NoAttr=>1,
-			  OutputFile => 'state.xml',
-			  XMLDecl    => "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>",
-			  RootName => 'state'
-			  );
-}
-
-sub isWordExists(){
-	my $r_list = $_[0];
-	my $line = $_[1];
-
-	foreach (@$r_list){
-		if ($line =~ /$_/){
-			return 1;
-		}
-	}
-	return 0;
-}
-
-sub reply(){
-
-	my %arg = (
-		reply_to => '',
-		reply_text => '',
-		inReplyTo => '',
-		dry_run => 0,
-		@_
-		);
-
-	my ($reply_to,$reply_text,$inReplyTo,$dry_run) = @arg{'reply_to','reply_text','inReplyTo','dry_run'};
-
-#	print $twit."\n";
-	    
-	my $text = sprintf('@%s %s',$reply_to,$reply_text);
-
-#	if($dry_run){
-
-#		print encode_utf8($text." ".$inReplyTo."\n");
-#		return;
-#	}
-	return myUpdateStatus::updateStatus(
-		status => $text,
-		in_reply_to_status_id => $inReplyTo,
-		debug => $dry_run
-	);
-#	print $text;
-}
-
-exit;
+} 

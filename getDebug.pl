@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-reply some followers post
+デバッグ用に各種データをダンプする
 
 =head1 SYNOPSIS
 
@@ -11,6 +11,7 @@ reply [options]
     --userid   -u  USEID USERIDのデータをダンプする
     --timoline -t  タイムラインのデータをダンプする
     --api      -a  HOGE 任意のNet::Twitterのメソッドを実行する
+    --myid     -m  自分の情報
 =cut
 
 
@@ -28,7 +29,8 @@ use MyBot;
 my %opt = (
 		'userid'   => '',
 		'timeline' => 0,
-		'api'      => ''
+		'api'      => '',
+		'myid'     => 0
 		);
 
 
@@ -37,13 +39,16 @@ GetOptions(
 		userid|u=s
 		timeline|t
 		api|a=s
+		myid|m
         /
         ) or pod2usage(verbose => 0);
 
+
 my $bot = MyBot->new();
 
+print Dumper $bot->{'twit'}->update_profile() if($opt{'myid'});
 print Dumper $bot->{'twit'}->show_user($opt{'userid'}) if($opt{'userid'});
-print Dumper $bot->{'twit'}->friends_timeline() if($opt{'timeline'});
+print Dumper $bot->{'twit'}->home_timeline() if($opt{'timeline'});
 eval{"print Dumper $bot->{'twit'}->$opt{api}"} if($opt{'api'});
 
 
