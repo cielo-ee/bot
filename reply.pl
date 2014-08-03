@@ -48,7 +48,7 @@ GetOptions(
 		NGword|w=s
 		NGuser|u=s
 		lastidf|l=s
-		post|p=s
+		pgost|p=s
 		statf|s=s
         /
         ) or pod2usage(verbose => 0);
@@ -73,6 +73,8 @@ if(-f $lastIdfile){
 		$lastCheckedId = loadLine($lastIdfile);
 }
 
+#print $lastCheckedId;
+
 my $r_timeline = $bot->{'twit'}->home_timeline({since_id => $lastCheckedId})
 	 or die "failed to get timeline.\n";
 
@@ -87,9 +89,9 @@ saveLine($lastIdfile,$nextLastChackedId);
 my @timeline = reverse(@$r_timeline);
 
 
-#foreach(@timeline){
-#		&execReply($bot,$myID,$_,\@OK,\@NG,$opt{'dry-run'});
-#}
+foreach my $line (@timeline){
+		&execReply($bot,$config,$line ,$opt{'dry-run'});
+}
 
 
 
@@ -137,10 +139,15 @@ sub getReplyData{
 
 sub isWordExists{
 		my ($text,$wordlist) = @_;
-
-		foreach my $word(@$wordlist){
-				return if $text =~ /$word/;
+		
+		my $word = ""; #初期値は空文字列(false);
+		foreach my $item(@$wordlist){
+				if($text =~ /($item)/){
+						$word = $1;
+						last;
+				}
 		}
+		return $word;
 }
 
 sub loadFile{
@@ -149,7 +156,7 @@ sub loadFile{
 		my @lines = <$fh>;
 		close $fh or die "Cannot close $filename:$!";
 		@lines = map {decode_utf8 $_} @lines;
-		@lines = chomp for @lines;
+		s/\x0D?\x0A$//g for @lines;
 		return @lines;
 }
 
@@ -177,13 +184,13 @@ sub init{
 		my $myID      = &getMyId($bot,$opt{'myid'});
 		my %replyPair  = loadReplyFile($opt{'file'});
 		my $NGwordfile = $opt{'NGword'};
-		my $NGuserfile = $opt{'NGdata'};
+		my $NGuserfile = $opt{'NGuser'};
 		my $id = getMyId($bot,$opt{'myid'});
 		my @NGword = ();
 		my @NGuser = ();
 		if(-f $NGwordfile){
 				@NGword = loadFile($NGwordfile);
-				print Dumper @NGword;
+#				print Dumper @NGword;
 		}
 		if(-f $NGuserfile){
 				@NGuser = loadFile($NGuserfile);
@@ -201,20 +208,35 @@ sub init{
 
 }
 
-__END__
 
 sub execReply{
-		my ($bot,$myId,$line,$NG,$OK,$dry) = @_;
-		return if $line->{'user'}->{'id'} == $myId; #自分自身にはリプライ不要
+		my ($bot,$config,$line,$dry) = @_;
+#		print Dumper $line;
+		return if  $line->{'user'}->{'id'} == $config->{'id'}; #自分自身にはリプライ不要
 		my $text = $line->{'text'};
 		return if  $text =~ /@/; #@が入っていたらリプライ不要
-		return if &isWordExists($text,$NG); #Ngワードが入っていたらリプライ不要
+		return if &isWordExists($text,$config->{'NGword'}); #Ngワードが入っていたらリプライ不要
+		return if &isWordExists($line->{'user'}->{'screen_name'},$config->{'NGuser'});
 
+		my $replySource_r = $config->{'replyPair'};
+		my @replySource = keys(%$replySource_r);
+		
+		my $response = &isWordExists($text,\@replySource);
+
+		return if(!$response);
+
+		print encode_utf8($response);
+		my $poststr = sprintf "@%s %s",$line->{'user'}->{'screen_name'},$config->{'replyPair'}->{$response};
+		my $in_reply_to = $line->{'id'};
+		
 		if($dry){
-				print encode_utf8();
+				print encode_utf8($poststr);
+				print "\n$in_reply_to\n";
 		}
 		else{
-				$bot->{'twit'}->update() if (&isWordExists($line,$OK));
+				$bot->{'twit'}->update({'status' => $poststr,
+						in_reply_to_status_id => $in_reply_to
+				});
 		}
 		return;
 
