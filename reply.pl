@@ -41,7 +41,7 @@ my %opt = (
 
 
 GetOptions(
-        \my %opts, qw/
+        \%opt, qw/
         dry-run|n
 		file|r=s
 		myid|m=s
